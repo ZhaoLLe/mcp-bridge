@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "mcp-bridge": {
+      "url": "http://localhost:3000/sse"
+    }
+  }
+}

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Bridge SDK 测试</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #f0f2f5;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    .status { font-size: 14px; padding: 4px 12px; border-radius: 20px; display: inline-block; }
+    .status.offline { background: #fee2e2; color: #dc2626; }
+    .status.online { background: #dcfce7; color: #16a34a; }
+    label { display: block; font-size: 14px; color: #666; margin-bottom: 4px; }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #3b82f6; }
+    textarea { font-family: monospace; min-height: 80px; resize: vertical; }
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button.primary { background: #3b82f6; color: white; }
+    button.primary:hover { background: #2563eb; }
+    button.primary:disabled { background: #93c5fd; cursor: not-allowed; }
+    button.danger { background: #ef4444; color: white; margin-top: 8px; }
+    .log {
+      background: #1f2937;
+      color: #e5e7eb;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .log-entry { margin-bottom: 4px; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.success { color: #34d399; }
+    .request {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .request h3 { margin-bottom: 8px; color: #0369a1; }
+    .request pre { background: #1f2937; color: #e5e7eb; padding: 8px; border-radius: 4px; overflow-x: auto; }
+    .request-actions { margin-top: 12px; display: flex; gap: 8px; }
+    .request-actions button { width: auto; padding: 8px 16px; }
+    .request-actions .btn-success { background: #16a34a; color: white; }
+    .request-actions .btn-fail { background: #dc2626; color: white; }
+    .hint { font-size: 12px; color: #888; margin-top: 4px; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+    .tag.sdk { background: #dbeafe; color: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>MCP Bridge SDK 测试 <span class="tag sdk">SDK</span> <span id="status" class="status offline">离线</span></h1>
+    <p style="color:#666; margin-bottom:16px;">使用 SDK 注册工具并连接，等待 Claude 调用</p>
+
+    <label>工具名称</label>
+    <input type="text" id="toolName" placeholder="例如: get_weather">
+    <div class="hint">使用小写字母和下划线，如 get_weather, search_web</div>
+
+    <label>工具描述</label>
+    <input type="text" id="toolDesc" placeholder="例如: 获取指定城市的天气信息">
+
+    <label>参数列表（每行一个：参数名:描述）</label>
+    <textarea id="params" placeholder="city:城市名称&#10;unit:温度单位（可选）">city:城市名称</textarea>
+
+    <button id="mainBtn" class="primary" onclick="handleRegister()">注册并连接</button>
+    <button id="disconnectBtn" class="danger" style="display:none" onclick="handleDisconnect()">断开连接</button>
+  </div>
+
+  <div class="card" id="requestCard" style="display:none">
+    <h2>收到调用请求</h2>
+    <div id="requestList"></div>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div id="log" class="log"><div class="log-entry">等待操作...</div></div>
+  </div>
+
+  <!-- 加载编译后的 SDK -->
+  <script src="./dist/browser.js"></script>
+  <script>
+    const API_URL = 'http://localhost:3000/api/tools';
+    const WS_URL = 'ws://localhost:3000/ws';
+
+    // 创建 SDK 客户端实例
+    const client = new mcpBridgeSdk.MCPBridgeClient({
+      apiUrl: API_URL,
+      wsUrl: WS_URL
+    });
+
+    function log(msg, type = '') {
+      const el = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.appendChild(entry);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function setStatus(online) {
+      const el = document.getElementById('status');
+      el.textContent = online ? '已连接' : '离线';
+      el.className = 'status ' + (online ? 'online' : 'offline');
+    }
+
+    function parseParams(text) {
+      const params = [];
+      text.trim().split('\n').forEach(line => {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0) {
+          const name = line.slice(0, colonIdx).trim();
+          const desc = line.slice(colonIdx + 1).trim();
+          const isOptional = name.includes('可选') || desc.includes('可选');
+          params.push({
+            name,
+            description: desc || name,
+            required: !isOptional
+          });
+        }
+      });
+      return params;
+    }
+
+    // 监听事件
+    client.on('connected', (data) => {
+      setStatus(true);
+      log(`已连接，ID: ${data.clientId.slice(0, 8)}...`, 'success');
+      log(`等待 Claude 调用...`);
+      document.getElementById('mainBtn').style.display = 'none';
+      document.getElementById('disconnectBtn').style.display = 'block';
+    });
+
+    client.on('disconnected', (data) => {
+      setStatus(false);
+      log('连接已断开' + (data.reason ? `: ${data.reason}` : ''));
+      document.getElementById('mainBtn').style.display = 'block';
+      document.getElementById('disconnectBtn').style.display = 'none';
+    });
+
+    client.on('tool_request', (request) => {
+      log(`收到调用: ${request.tool}`);
+      showRequest(request);
+    });
+
+    client.on('error', (err) => {
+      log(`错误: ${err.code} - ${err.message}`, 'error');
+    });
+
+    async function handleRegister() {
+      const name = document.getElementById('toolName').value.trim();
+      const desc = document.getElementById('toolDesc').value.trim();
+      const paramsText = document.getElementById('params').value.trim();
+
+      if (!name || !desc) {
+        log('请填写工具名称和描述', 'error');
+        return;
+      }
+
+      const params = parseParams(paramsText);
+
+      // 使用 SDK 注册工具并连接
+      log(`注册工具: ${name}...`);
+      try {
+        await client.register({
+          name,
+          description: desc,
+          params
+        });
+        log(`工具 "${name}" 注册成功`, 'success');
+      } catch (e) {
+        log(`注册失败: ${e.message}`, 'error');
+      }
+    }
+
+    function showRequest(req) {
+      const card = document.getElementById('requestCard');
+      const list = document.getElementById('requestList');
+      card.style.display = 'block';
+
+      const div = document.createElement('div');
+      div.className = 'request';
+      div.id = `req-${req.requestId}`;
+      div.innerHTML = `
+        <h3>${req.tool}</h3>
+        <pre>${JSON.stringify(req.arguments, null, 2)}</pre>
+        <input type="text" id="res-${req.requestId}" placeholder="输入返回结果（JSON 或文本）" style="margin-top:8px">
+        <div class="request-actions">
+          <button class="btn-success" onclick="respond('${req.requestId}', true)">返回成功</button>
+          <button class="btn-fail" onclick="respond('${req.requestId}', false)">返回失败</button>
+        </div>
+      `;
+      list.prepend(div);
+    }
+
+    function respond(requestId, success) {
+      const input = document.getElementById(`res-${requestId}`).value;
+      let result = {};
+      try {
+        result = input ? JSON.parse(input) : {};
+      } catch {
+        result = { message: input };
+      }
+
+      if (success) {
+        client.respondSuccess(requestId, result);
+        log(`已响应: 成功`, 'success');
+      } else {
+        client.respondError(requestId, '操作失败');
+        log(`已响应: 失败`, 'error');
+      }
+
+      const el = document.getElementById(`req-${requestId}`);
+      if (el) el.style.opacity = '0.5';
+      setTimeout(() => el?.remove(), 1000);
+    }
+
+    function handleDisconnect() {
+      client.disconnect();
+    }
+
+    // 初始化
+    log('请填写工具信息并点击"注册并连接"');
+  </script>
+</body>
+</html>

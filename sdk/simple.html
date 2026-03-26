@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP 工具注册</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #f0f2f5;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    .status { font-size: 14px; padding: 4px 12px; border-radius: 20px; display: inline-block; }
+    .status.offline { background: #fee2e2; color: #dc2626; }
+    .status.online { background: #dcfce7; color: #16a34a; }
+    label { display: block; font-size: 14px; color: #666; margin-bottom: 4px; }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #3b82f6; }
+    textarea { font-family: monospace; min-height: 80px; resize: vertical; }
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button.primary { background: #3b82f6; color: white; }
+    button.primary:hover { background: #2563eb; }
+    button.primary:disabled { background: #93c5fd; cursor: not-allowed; }
+    button.danger { background: #ef4444; color: white; margin-top: 8px; }
+    .log {
+      background: #1f2937;
+      color: #e5e7eb;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .log-entry { margin-bottom: 4px; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.success { color: #34d399; }
+    .request {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .request h3 { margin-bottom: 8px; color: #0369a1; }
+    .request pre { background: #1f2937; color: #e5e7eb; padding: 8px; border-radius: 4px; overflow-x: auto; }
+    .request-actions { margin-top: 12px; display: flex; gap: 8px; }
+    .request-actions button { width: auto; padding: 8px 16px; }
+    .request-actions .btn-success { background: #16a34a; color: white; }
+    .request-actions .btn-fail { background: #dc2626; color: white; }
+    .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>MCP 工具注册 <span id="status" class="status offline">离线</span></h1>
+    <p style="color:#666; margin-bottom:16px;">注册工具并连接，等待 Claude 调用</p>
+
+    <label>工具名称</label>
+    <input type="text" id="toolName" placeholder="例如: get_weather">
+    <div class="hint">使用小写字母和下划线，如 get_weather, search_web</div>
+
+    <label>工具描述</label>
+    <input type="text" id="toolDesc" placeholder="例如: 获取指定城市的天气信息">
+
+    <label>参数列表（每行一个：参数名:描述）</label>
+    <textarea id="params" placeholder="city:城市名称&#10;unit:温度单位（可选）">city:城市名称</textarea>
+
+    <button id="mainBtn" class="primary" onclick="handleRegister()">注册并连接</button>
+    <button id="disconnectBtn" class="danger" style="display:none" onclick="handleDisconnect()">断开连接</button>
+  </div>
+
+  <div class="card" id="requestCard" style="display:none">
+    <h2>收到调用请求</h2>
+    <div id="requestList"></div>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div id="log" class="log"><div class="log-entry">等待操作...</div></div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3000/api/tools';
+    const WS_URL = 'ws://localhost:3000/ws';
+
+    let ws = null;
+    let currentTool = null;
+    let heartbeatTimer = null;
+
+    function log(msg, type = '') {
+      const el = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.appendChild(entry);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function setStatus(online) {
+      const el = document.getElementById('status');
+      el.textContent = online ? '已连接' : '离线';
+      el.className = 'status ' + (online ? 'online' : 'offline');
+    }
+
+    function parseParams(text) {
+      const params = {};
+      const required = [];
+      text.trim().split('\n').forEach(line => {
+        const [name, desc] = line.split(':').map(s => s.trim());
+        if (name) {
+          params[name] = { type: 'string', description: desc || name };
+          if (!name.includes('可选') && !desc?.includes('可选')) {
+            required.push(name);
+          }
+        }
+      });
+      return { type: 'object', properties: params, required };
+    }
+
+    async function handleRegister() {
+      const name = document.getElementById('toolName').value.trim();
+      const desc = document.getElementById('toolDesc').value.trim();
+      const paramsText = document.getElementById('params').value.trim();
+
+      if (!name || !desc) {
+        log('请填写工具名称和描述', 'error');
+        return;
+      }
+
+      const inputSchema = parseParams(paramsText);
+
+      // 1. 注册工具
+      log(`注册工具: ${name}...`);
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description: desc,
+            inputSchema,
+            handler: { type: 'websocket', timeout: 30000 }
+          })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          if (data.error?.code === 'DUPLICATE_TOOL') {
+            log(`工具已存在，继续连接...`);
+          } else {
+            log(`注册失败: ${data.error?.message}`, 'error');
+            return;
+          }
+        } else {
+          log(`工具 "${name}" 注册成功`, 'success');
+        }
+        currentTool = name;
+      } catch (e) {
+        log(`注册失败: ${e.message}`, 'error');
+        return;
+      }
+
+      // 2. 连接 WebSocket
+      log('连接 WebSocket...');
+      connectWS(name);
+    }
+
+    function connectWS(toolName) {
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'register', capabilities: [toolName] }));
+        // 启动心跳（每 25 秒发送一次，小于服务端的 30 秒检查间隔）
+        heartbeatTimer = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        switch (msg.type) {
+          case 'registered':
+            setStatus(true);
+            log(`已连接，ID: ${msg.clientId.slice(0, 8)}...`, 'success');
+            log(`等待 Claude 调用 "${toolName}"...`);
+            document.getElementById('mainBtn').style.display = 'none';
+            document.getElementById('disconnectBtn').style.display = 'block';
+            break;
+
+          case 'pong':
+            // 心跳响应，保持静默
+            break;
+
+          case 'tool_request':
+            log(`收到调用: ${msg.tool}`);
+            showRequest(msg);
+            break;
+
+          case 'error':
+            log(`错误: ${msg.code} - ${msg.message}`, 'error');
+            break;
+        }
+      };
+
+      ws.onclose = () => {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        setStatus(false);
+        log('连接已断开');
+        document.getElementById('mainBtn').style.display = 'block';
+        document.getElementById('disconnectBtn').style.display = 'none';
+      };
+
+      ws.onerror = () => log('WebSocket 连接失败', 'error');
+    }
+
+    function showRequest(req) {
+      const card = document.getElementById('requestCard');
+      const list = document.getElementById('requestList');
+      card.style.display = 'block';
+
+      const div = document.createElement('div');
+      div.className = 'request';
+      div.id = `req-${req.requestId}`;
+      div.innerHTML = `
+        <h3>${req.tool}</h3>
+        <pre>${JSON.stringify(req.arguments, null, 2)}</pre>
+        <input type="text" id="res-${req.requestId}" placeholder="输入返回结果（JSON 或文本）" style="margin-top:8px">
+        <div class="request-actions">
+          <button class="btn-success" onclick="respond('${req.requestId}', true)">返回成功</button>
+          <button class="btn-fail" onclick="respond('${req.requestId}', false)">返回失败</button>
+        </div>
+      `;
+      list.prepend(div);
+    }
+
+    function respond(requestId, success) {
+      const input = document.getElementById(`res-${requestId}`).value;
+      let result = {};
+      try {
+        result = input ? JSON.parse(input) : {};
+      } catch {
+        result = { message: input };
+      }
+
+      const response = {
+        type: 'tool_response',
+        requestId,
+        success
+      };
+      if (success) {
+        response.result = result;
+      } else {
+        response.error = { code: 'FAILED', message: '操作失败' };
+      }
+      ws.send(JSON.stringify(response));
+
+      const el = document.getElementById(`req-${requestId}`);
+      if (el) el.style.opacity = '0.5';
+      setTimeout(() => el?.remove(), 1000);
+      log(`已响应: ${success ? '成功' : '失败'}`, success ? 'success' : 'error');
+    }
+
+    function handleDisconnect() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      if (ws) ws.close();
+    }
+
+    // 初始化
+    log('请填写工具信息并点击"注册并连接"');
+  </script>
+</body>
+</html>

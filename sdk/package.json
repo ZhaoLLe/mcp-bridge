@@ -1,0 +1,36 @@
+{
+  "name": "mcp-bridge-sdk",
+  "version": "1.0.0",
+  "description": "SDK for connecting to MCP Bridge",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/browser.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc && npm run build:browser",
+    "build:browser": "esbuild src/index.ts --bundle --format=iife --global-name=mcpBridgeSdk --outfile=dist/browser.js",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "mcp-bridge",
+    "websocket"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}

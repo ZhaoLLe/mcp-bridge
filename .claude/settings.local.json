@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST http://localhost:3000/api/tools/say_hello/invoke \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\"name\": \"王五\"}')"
+    ]
+  }
+}
