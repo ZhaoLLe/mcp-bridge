@@ -138,5 +138,10 @@ function handleToolResponse(
   }
 
   console.log('[DEBUG] Validation passed, calling executor.handleResponse')
-  executor.handleResponse(result.data)
+  executor.handleResponse({
+    requestId: result.data.requestId,
+    success: result.data.success,
+    result: result.data.result,
+    error: result.data.error ? { message: result.data.error.message } : undefined
+  })
 }

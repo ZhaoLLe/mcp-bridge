@@ -1,11 +1,20 @@
 /**
  * 工具执行器
- * 处理工具执行逻辑，特别是 WebSocket handler 类型
+ * 处理工具执行逻辑，包括 WebSocket、Skill 和 HTTP handler 类型
  */
 
 import type { Tool, PendingRequest, ErrorCode, WSToolRequestMessage, WSClient } from './types'
 import { ToolRegistry } from './registry'
 import { randomUUID } from 'crypto'
+
+/**
+ * HTTP 响应接口
+ */
+interface HttpResponse {
+  data: unknown
+  status: number
+  headers: Record<string, string>
+}
 
 /**
  * WebSocket 客户端管理器接口（依赖倒置）
@@ -14,13 +23,37 @@ export interface IWSClientManager {
   getClientsWithCapability(capability: string): WSClient[]
 }
 
+/**
+ * Skill 执行器接口（依赖倒置，避免循环依赖）
+ */
+export interface ISkillExecutor {
+  execute(skillName: string, args: Record<string, unknown>): Promise<{
+    skillId: string
+    skillName: string
+    input: Record<string, unknown>
+    output?: unknown
+    error?: { code: string; message: string; nodeId?: string }
+    status: 'success' | 'failed' | 'timeout'
+    duration: number
+    nodeExecutions: unknown[]
+  }>
+}
+
 export class ToolExecutor {
   private pendingRequests: Map<string, PendingRequest> = new Map()
 
   constructor(
     private registry: ToolRegistry,
-    private clientManager: IWSClientManager
+    private clientManager: IWSClientManager,
+    private skillExecutor?: ISkillExecutor
   ) {}
+
+  /**
+   * 设置 Skill 执行器（用于延迟注入）
+   */
+  setSkillExecutor(executor: ISkillExecutor): void {
+    this.skillExecutor = executor
+  }
 
   /**
    * 执行工具
@@ -47,9 +80,56 @@ export class ToolExecutor {
       return this.executeWebSocket(tool, args)
     }
 
+    if (handler.type === 'skill') {
+      return this.executeSkill(handler.skillName, args)
+    }
+
+    if (handler.type === 'http') {
+      return this.executeHttp(handler, args)
+    }
+
     return {
       success: false,
       error: { code: 'EXECUTION_FAILED', message: `Unknown handler type: ${(handler as { type: string }).type}` }
+    }
+  }
+
+  /**
+   * Skill Handler 执行
+   */
+  private async executeSkill(
+    skillName: string,
+    args: Record<string, unknown>
+  ): Promise<{ success: boolean; result?: unknown; error?: { code: ErrorCode; message: string } }> {
+    if (!this.skillExecutor) {
+      return {
+        success: false,
+        error: { code: 'EXECUTION_FAILED', message: 'Skill executor not configured' }
+      }
+    }
+
+    try {
+      const result = await this.skillExecutor.execute(skillName, args)
+
+      if (result.status === 'success') {
+        return {
+          success: true,
+          result: result.output
+        }
+      } else {
+        return {
+          success: false,
+          error: {
+            code: 'EXECUTION_FAILED',
+            message: result.error?.message || `Skill '${skillName}' execution failed`
+          }
+        }
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: { code: 'EXECUTION_FAILED', message: String(error) }
+      }
     }
   }
 
@@ -182,5 +262,66 @@ export class ToolExecutor {
    */
   getPendingRequests(): PendingRequest[] {
     return Array.from(this.pendingRequests.values())
+  }
+
+  /**
+   * HTTP Handler 执行
+   */
+  private async executeHttp(
+    handler: { type: 'http'; url: string; method: string; headers?: Record<string, string>; timeout?: number },
+    args: Record<string, unknown>
+  ): Promise<{ success: boolean; result?: unknown; error?: { code: ErrorCode; message: string } }> {
+    const timeout = handler.timeout ?? 30000
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+      const response = await fetch(handler.url, {
+        method: handler.method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...handler.headers
+        },
+        body: handler.method !== 'GET' && handler.method !== 'DELETE' ? JSON.stringify(args) : undefined,
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      const data = await response.json()
+
+      if (response.ok) {
+        return {
+          success: true,
+          result: data
+        }
+      } else {
+        return {
+          success: false,
+          error: {
+            code: 'HTTP_ERROR',
+            message: data.message || data.error || `HTTP ${response.status}: ${response.statusText}`
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          return {
+            success: false,
+            error: { code: 'TIMEOUT', message: `HTTP request timed out after ${timeout}ms` }
+          }
+        }
+        return {
+          success: false,
+          error: { code: 'HTTP_ERROR', message: error.message }
+        }
+      }
+      return {
+        success: false,
+        error: { code: 'HTTP_ERROR', message: String(error) }
+      }
+    }
   }
 }

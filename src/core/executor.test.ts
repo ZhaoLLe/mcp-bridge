@@ -18,12 +18,12 @@ describe('ToolExecutor', () => {
     lastPingAt: Date.now(),
   })
 
-  const registerTool = (name: string, handler = { type: 'websocket' as const }) => {
+  const registerTool = (name: string, handler: { type: 'websocket'; timeout?: number; target?: 'all' | 'first' | 'specific'; clientId?: string } = { type: 'websocket' }) => {
     registry.register({
       name,
       description: `Tool ${name}`,
       inputSchema: { type: 'object', properties: {} },
-      handler,
+      handler: handler as any,
     })
   }
 

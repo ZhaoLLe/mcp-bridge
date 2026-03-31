@@ -27,6 +27,7 @@ describe('ToolRegistry', () => {
 
       expect(tool.name).toBe('test_tool')
       expect(tool.description).toBe('Tool test_tool')
+      expect(tool.status).toBe('enabled')
       expect(tool.createdAt).toBe(tool.updatedAt)
     })
 
@@ -83,6 +84,40 @@ describe('ToolRegistry', () => {
     })
   })
 
+  describe('list()', () => {
+    it('should return paginated list', () => {
+      for (let i = 1; i <= 25; i++) {
+        registry.register(createTool(`tool_${i.toString().padStart(2, '0')}`))
+      }
+
+      const result = registry.list({ page: 1, pageSize: 10 })
+
+      expect(result.tools).toHaveLength(10)
+      expect(result.total).toBe(25)
+    })
+
+    it('should filter by status', () => {
+      registry.register(createTool('enabled_tool'))
+      registry.register(createTool('disabled_tool'))
+      registry.toggleStatus('disabled_tool')
+
+      const result = registry.list({ status: 'enabled' })
+
+      expect(result.tools).toHaveLength(1)
+      expect(result.tools[0].name).toBe('enabled_tool')
+    })
+
+    it('should search by name', () => {
+      registry.register(createTool('weather_query'))
+      registry.register(createTool('send_message'))
+
+      const result = registry.list({ search: 'weather' })
+
+      expect(result.tools).toHaveLength(1)
+      expect(result.tools[0].name).toBe('weather_query')
+    })
+  })
+
   describe('update()', () => {
     it('should update tool description', () => {
       registry.register(createTool('test_tool'))
@@ -117,7 +152,7 @@ describe('ToolRegistry', () => {
         handler: { type: 'websocket', timeout: 60000 },
       })
 
-      expect(updated.handler.timeout).toBe(60000)
+      expect((updated.handler as any).timeout).toBe(60000)
     })
 
     it('should throw error for non-existent tool', () => {
@@ -182,6 +217,31 @@ describe('ToolRegistry', () => {
     })
   })
 
+  describe('toggleStatus()', () => {
+    it('should toggle tool status from enabled to disabled', () => {
+      registry.register(createTool('test_tool'))
+
+      const tool = registry.toggleStatus('test_tool')
+
+      expect(tool.status).toBe('disabled')
+    })
+
+    it('should toggle tool status from disabled to enabled', () => {
+      registry.register(createTool('test_tool'))
+      registry.toggleStatus('test_tool')
+
+      const tool = registry.toggleStatus('test_tool')
+
+      expect(tool.status).toBe('enabled')
+    })
+
+    it('should throw error for non-existent tool', () => {
+      expect(() => registry.toggleStatus('nonexistent')).toThrow(
+        "Tool 'nonexistent' not found"
+      )
+    })
+  })
+
   describe('generateMCPConfig()', () => {
     it('should generate valid MCP config', () => {
       registry.register(createTool('tool1'))
@@ -197,6 +257,17 @@ describe('ToolRegistry', () => {
       )
       expect(config.tools).toContain('tool1')
       expect(config.tools).toContain('tool2')
+    })
+
+    it('should only include enabled tools in MCP config', () => {
+      registry.register(createTool('enabled_tool'))
+      registry.register(createTool('disabled_tool'))
+      registry.toggleStatus('disabled_tool')
+
+      const config = registry.generateMCPConfig()
+
+      expect(config.tools).toContain('enabled_tool')
+      expect(config.tools).not.toContain('disabled_tool')
     })
 
     it('should include createdAt timestamp', () => {

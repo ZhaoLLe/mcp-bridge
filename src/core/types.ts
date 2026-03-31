@@ -30,9 +30,28 @@ export interface WebSocketHandler {
 }
 
 /**
- * 工具 Handler 类型（第一阶段只支持 websocket）
+ * Skill Handler 配置
  */
-export type ToolHandler = WebSocketHandler
+export interface SkillHandler {
+  type: 'skill'
+  skillName: string
+}
+
+/**
+ * HTTP Handler 配置
+ */
+export interface HttpHandler {
+  type: 'http'
+  url: string
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+  headers?: Record<string, string>
+  timeout?: number // 超时时间（毫秒），默认 30000
+}
+
+/**
+ * 工具 Handler 类型
+ */
+export type ToolHandler = WebSocketHandler | SkillHandler | HttpHandler
 
 /**
  * 工具定义
@@ -42,6 +61,7 @@ export interface Tool {
   description: string
   inputSchema: InputSchema
   handler: ToolHandler
+  status: 'enabled' | 'disabled'
   createdAt: number
   updatedAt: number
 }
@@ -178,6 +198,10 @@ export type EventType =
   | 'tool_registered'
   | 'tool_deleted'
   | 'tool_updated'
+  | 'skill_invoked'
+  | 'skill_registered'
+  | 'skill_updated'
+  | 'skill_deleted'
 
 export type ErrorCode =
   | 'INVALID_MESSAGE'
@@ -259,4 +283,205 @@ export interface ToolInvokeResult {
     message: string
   }
   duration: number
+}
+
+// ==================== Skill 相关 ====================
+
+/**
+ * Skill 节点类型
+ */
+export type SkillNodeType = 'start' | 'end' | 'tool' | 'condition'
+
+/**
+ * Skill 节点配置
+ */
+export interface SkillNodeConfig {
+  // Start 节点
+  inputSchema?: InputSchema
+  // Tool 节点
+  toolName?: string
+  inputMapping?: Record<string, string>
+  // Condition 节点
+  condition?: string
+  // End 节点
+  outputMapping?: Record<string, string>
+}
+
+/**
+ * Skill 节点
+ */
+export interface SkillNode {
+  id: string
+  type: SkillNodeType
+  name: string
+  config: SkillNodeConfig
+  position: { x: number; y: number }
+}
+
+/**
+ * Skill 边
+ */
+export interface SkillEdge {
+  id: string
+  source: string
+  target: string
+  label?: 'true' | 'false' | string
+}
+
+/**
+ * Skill 暴露模式
+ */
+export interface SkillExposeModes {
+  asSkill: boolean    // 生成 SKILL.md
+  asTool: boolean     // 注册为 MCP Tool
+  asPrompt: boolean   // 生成 Prompt 模板
+}
+
+/**
+ * Skill 定义
+ */
+export interface Skill {
+  id: string
+  name: string                        // snake_case，唯一
+  displayName: string                 // 显示名称
+  description: string                 // 描述
+
+  // 触发配置
+  triggerPhrases: string[]            // 触发短语列表
+
+  // 暴露模式
+  exposeModes: SkillExposeModes
+
+  status: 'enabled' | 'disabled'
+  inputSchema: InputSchema
+  outputSchema?: InputSchema
+  nodes: SkillNode[]
+  edges: SkillEdge[]
+
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * 创建 Skill 请求
+ */
+export interface CreateSkillRequest {
+  name: string
+  displayName: string
+  description: string
+  triggerPhrases?: string[]
+  exposeModes?: Partial<SkillExposeModes>
+  inputSchema: InputSchema
+  outputSchema?: InputSchema
+  nodes: SkillNode[]
+  edges: SkillEdge[]
+}
+
+/**
+ * 更新 Skill 请求
+ */
+export interface UpdateSkillRequest {
+  displayName?: string
+  description?: string
+  triggerPhrases?: string[]
+  exposeModes?: Partial<SkillExposeModes>
+  inputSchema?: InputSchema
+  outputSchema?: InputSchema
+  nodes?: SkillNode[]
+  edges?: SkillEdge[]
+}
+
+/**
+ * Skill 列表响应
+ */
+export interface SkillListResponse {
+  skills: Skill[]
+  total: number
+}
+
+/**
+ * Skill 执行上下文
+ */
+export interface SkillExecutionContext {
+  skillId: string
+  skillName: string
+  input: Record<string, unknown>
+  nodeOutputs: Map<string, unknown>
+  currentNodeId: string | null
+  startTime: number
+}
+
+/**
+ * 节点执行结果
+ */
+export interface NodeExecutionResult {
+  nodeId: string
+  nodeName: string
+  nodeType: SkillNodeType
+  input?: Record<string, unknown>
+  output?: unknown
+  error?: {
+    code: string
+    message: string
+  }
+  status: 'success' | 'failed' | 'skipped'
+  duration: number
+}
+
+/**
+ * Skill 执行结果
+ */
+export interface SkillExecutionResult {
+  skillId: string
+  skillName: string
+  input: Record<string, unknown>
+  output?: unknown
+  error?: {
+    code: string
+    message: string
+    nodeId?: string
+  }
+  status: 'success' | 'failed' | 'timeout'
+  duration: number
+  nodeExecutions: NodeExecutionResult[]
+}
+
+// ==================== 调用日志 ====================
+
+/**
+ * 调用日志
+ */
+export interface InvokeLog {
+  id: string
+  type: 'tool' | 'skill'
+  name: string
+  skillId?: string
+  arguments: Record<string, unknown>
+  result?: unknown
+  error?: { code: string; message: string }
+  status: 'success' | 'failed' | 'timeout'
+  duration: number
+  timestamp: number
+  subCalls?: InvokeLog[]
+}
+
+/**
+ * 调用日志查询选项
+ */
+export interface LogQueryOptions {
+  type?: 'tool' | 'skill'
+  name?: string
+  status?: 'success' | 'failed' | 'timeout'
+  startTime?: number
+  endTime?: number
+  page?: number
+  pageSize?: number
+}
+
+/**
+ * 调用日志列表响应
+ */
+export interface InvokeLogListResponse {
+  logs: InvokeLog[]
+  total: number
 }

@@ -6,14 +6,21 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { ToolRegistry } from '../core/registry'
 import { ToolExecutor } from '../core/executor'
-import { CreateToolSchema, UpdateToolSchema } from '../core/schemas'
-import type { ApiResponse, ToolListResponse, ToolInvokeResult, RegisterToolResponse } from '../core/types'
+import { CreateToolSchema, UpdateToolSchema, ToolHandlerSchema } from '../core/schemas'
+import type {
+  ApiResponse,
+  ToolListResponse,
+  ToolInvokeResult,
+  RegisterToolResponse,
+  ToolHandler
+} from '../core/types'
 import type { EventEmitter } from 'events'
 
 export function createToolsRoutes(
   registry: ToolRegistry,
   executor: ToolExecutor,
-  eventEmitter: EventEmitter
+  eventEmitter: EventEmitter,
+  skillRegistry?: import('../core/skillRegistry').SkillRegistry
 ) {
   const app = new Hono()
 
@@ -54,6 +61,23 @@ export function createToolsRoutes(
     try {
       const body = await c.req.json()
       const validated = CreateToolSchema.parse(body)
+
+      // 如果是 skill handler，验证 skill 是否存在
+      if (validated.handler.type === 'skill') {
+        if (!skillRegistry) {
+          return c.json({
+            success: false,
+            error: { code: 'CONFIGURATION_ERROR', message: 'Skill registry not configured' }
+          }, 500)
+        }
+        const skill = skillRegistry.get(validated.handler.skillName)
+        if (!skill) {
+          return c.json({
+            success: false,
+            error: { code: 'SKILL_NOT_FOUND', message: `Skill '${validated.handler.skillName}' not found` }
+          }, 404)
+        }
+      }
 
       const tool = registry.register(validated)
 
@@ -168,6 +192,25 @@ export function createToolsRoutes(
     })
 
     return c.json(response, result.success ? 200 : 500)
+  })
+
+  // 切换工具状态
+  app.post('/:name/toggle', (c) => {
+    const name = c.req.param('name')
+
+    try {
+      const tool = registry.toggleStatus(name)
+      eventEmitter.emit('tool_updated', { tool })
+      return c.json({ success: true, data: tool })
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('not found')) {
+        return c.json({
+          success: false,
+          error: { code: 'TOOL_NOT_FOUND', message: err.message }
+        }, 404)
+      }
+      throw err
+    }
   })
 
   return app
