@@ -22,6 +22,7 @@
 - Claude Code 读取 `description` 判断何时使用该 Skill
 
 ### SKILL.md 示例
+
 ```markdown
 ---
 name: weekend_recommend
@@ -37,20 +38,63 @@ version: 1.0.0
 
 用户想要获取周末活动建议时使用此 Skill。
 
+### 触发短语
+
+当用户输入以下内容时，会自动触发此 Skill：
+
+- "推荐周末活动"
+- "周末干什么"
+
 ## 执行步骤
 
 1. **获取天气**
    调用 `weather_query` 工具
 
+   参数映射：
+   - city = city（来自用户输入）
+
 2. **条件判断**
-   根据天气条件决定推荐方向
+   根据条件决定执行路径：
+   - 条件: `${weather_query.result} == "rainy"`
 
 ## 可用工具
 
-| 工具名 | 说明 |
-|--------|------|
-| weather_query | 查询天气 |
+| 工具名 | 说明 | 参数 |
+|--------|------|------|
+| weather_query | 查询天气 | city |
+
+## 输入参数
+
+请确保已经提供以下信息：
+
+- **city**: 从用户输入或上下文中获取
+
+## 输出
+
+最终返回结果：
+
+- activity = activity（来自工具 outdoor_activity 或 indoor_activity 的输出）
+
+## 示例
+
+用户："帮我推荐周末活动，城市是北京"
+
+执行流程:
+1. weather_query()
+2. 条件判断
+3. outdoor_activity() 或 indoor_activity()
+4. 返回结果
 ```
+
+### 改进点
+
+新版 SKILL.md 增强内容：
+
+1. **触发短语** - 清晰列出所有触发词
+2. **参数映射说明** - 每个工具的参数来源都有人类可读的解释
+3. **输入参数** - 从 inputMapping 自动提取所需参数
+4. **输出说明** - 描述最终返回结果的结构
+5. **使用示例** - 完整的用户示例和执行流程
 
 ### 使用方法
 
@@ -168,23 +212,75 @@ curl http://localhost:3000/api/tools
 - 用户手动选择并发送给 Claude
 - Claude 根据 Prompt 指导执行任务
 
-### Prompt 模板示例
+### Prompt 模板示例（改进版）
 
 ```
 # 周末活动推荐
 
 根据天气推荐周末活动。
 
+## 可用工具
+
+你需要按顺序调用以下工具：
+
+- `weather_query` - 查询天气
+- `outdoor_activity` - 推荐户外活动
+- `indoor_activity` - 推荐室内活动
+
+## 触发条件
+
+当用户输入以下内容时，执行此技能：
+
+- "推荐周末活动"
+- "周末干什么"
+
+## 输入参数
+
+在执行前，确保你已经从用户那里获取了以下信息：
+
+- **city**: 请向用户询问或从上下文中提取此参数
+
 ## 执行步骤
 
-1. 调用 `weather_query` 工具获取天气
-2. 根据天气条件决定推荐方向
-3. 返回活动推荐
+请按以下顺序执行：
 
-## 参数
+1. **调用 weather_query 工具**
 
-- city: 城市名称
+   参数映射：
+   - city = city（来自用户输入）
+
+2. **条件判断**: ${weather_query.result} == "rainy"
+
+3. **调用 outdoor_activity 或 indoor_activity 工具**
+
+   根据条件判断结果选择执行路径
+
+## 输出
+
+最终返回结果：
+- activity = activity（来自工具 outdoor_activity 或 indoor_activity 的输出）
+
+## 使用示例
+
+**用户**: 帮我推荐周末活动，城市是北京
+
+**助手**: 我将按步骤执行：
+
+1. 调用 weather_query...
+2. 根据天气条件选择合适的活动推荐
+3. 返回结果给用户
 ```
+
+### 改进点
+
+新版 Prompt 模板增强内容：
+
+1. **可用工具列表** - 清晰列出所有可用工具及其说明
+2. **触发条件** - 说明何时使用此 Prompt
+3. **输入参数** - 明确需要从用户获取的信息
+4. **执行步骤** - 详细的步骤说明，包括参数映射解释
+5. **输出说明** - 描述最终返回结果
+6. **使用示例** - 完整的对话示例，帮助 Claude 理解如何响应用户
 
 ### 使用方法
 
@@ -237,6 +333,15 @@ curl http://localhost:3000/api/tools
 
 Claude 识别到 description 中的关键词，自动调用 Skill。
 
+生成的 SKILL.md 包含：
+- YAML frontmatter（name, description, version）
+- 触发短语列表
+- 详细的执行步骤（含参数映射说明）
+- 可用工具表格
+- 输入参数说明
+- 输出结果描述
+- 完整使用示例
+
 ### 3. asTool 模式使用
 
 用户输入：
@@ -261,12 +366,59 @@ Claude 选择调用 `skill_weather_recommend` tool。
 
 根据天气情况推荐合适的活动。
 
+## 可用工具
+
+你需要按顺序调用以下工具：
+
+- `weather_query` - 查询天气
+- `outdoor_activity` - 推荐户外活动
+- `indoor_activity` - 推荐室内活动
+
+## 触发条件
+
+当用户输入以下内容时，执行此技能：
+
+- "推荐活动"
+- "天气怎么样"
+
+## 输入参数
+
+在执行前，确保你已经从用户那里获取了以下信息：
+
+- **city**: 请向用户询问或从上下文中提取此参数
+
 ## 执行步骤
 
-1. 调用 `weather_query` 工具获取当前天气
-2. 如果天气晴朗，推荐户外活动
-3. 如果下雨，推荐室内活动
+请按以下顺序执行：
+
+1. **调用 weather_query 工具**
+
+   参数映射：
+   - city = city（来自用户输入）
+
+2. **条件判断**: ${weather_query.result} == "rainy"
+
+3. **调用 outdoor_activity 或 indoor_activity 工具**
+
+   根据条件判断结果选择执行路径
+
+## 输出
+
+最终返回结果：
+- activity = activity（来自工具 outdoor_activity 或 indoor_activity 的输出）
+
+## 使用示例
+
+**用户**: 帮我推荐活动，城市是北京
+
+**助手**: 我将按步骤执行：
+
+1. 调用 weather_query...
+2. 根据天气条件选择合适的活动
+3. 返回结果给用户
 ```
+
+Claude 会按照 Prompt 中的详细说明执行任务。
 
 ---
 

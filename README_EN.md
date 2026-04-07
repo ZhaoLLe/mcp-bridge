@@ -31,6 +31,7 @@ npm run dev
 
 ### 1. Dynamic MCP Capability Registration
 - **Tools**: Dynamically register tool functions that can be called by MCP clients ✅
+- **Skills**: Visual workflow orchestration with conditional branching and multi-tool composition ✅
 - **Resources**: Dynamically register readable resources (planned)
 - **Prompts**: Dynamically register predefined prompt templates (planned)
 
@@ -153,10 +154,13 @@ mcp-bridge/
 │   ├── config.ts             # Configuration
 │   │
 │   ├── core/                 # Core engine
+│   │   ├── types.ts          # Core type definitions
 │   │   ├── registry.ts       # Tool registry (memory storage)
 │   │   ├── executor.ts       # Tool executor
-│   │   ├── schemas.ts        # Zod validation schemas
-│   │   └── types.ts          # Core type definitions
+│   │   ├── skillRegistry.ts  # Skill registry
+│   │   ├── skillExecutor.ts  # Skill execution engine
+│   │   ├── skillMdGenerator.ts # SKILL.md generator
+│   │   └── schemas.ts        # Zod validation schemas
 │   │
 │   ├── transport/            # Transport layer
 │   │   ├── sse.ts            # SSE MCP server
@@ -165,11 +169,22 @@ mcp-bridge/
 │   │   └── ws-route.ts       # WebSocket routing
 │   │
 │   ├── api/                  # HTTP API routes
-│   │   └── tools.ts          # Tools CRUD API
+│   │   ├── tools.ts          # Tools CRUD API
+│   │   ├── skills.ts         # Skills CRUD + invoke API
+│   │   └── logs.ts           # Log query API
 │   │
-│   └── web/                  # Web UI Hooks
-│       ├── useWebSocket.ts   # WebSocket connection hook
-│       └── useApi.ts         # HTTP API hook
+│   └── web/                  # React Web UI
+│       ├── App.tsx           # Main app component
+│       ├── main.tsx          # Entry point
+│       ├── index.html        # HTML template
+│       ├── styles.css        # Global styles
+│       ├── components/       # Reusable components
+│       ├── pages/            # Page components
+│       │   ├── ToolListPage.tsx
+│       │   ├── SkillEditorPage.tsx
+│       │   └── LogsPage.tsx
+│       └── services/
+│           └── api.ts        # API client
 │
 ├── sdk/                      # Frontend SDK
 │   ├── src/
@@ -184,6 +199,10 @@ mcp-bridge/
 ├── .mcp/
 │   └── settings.json         # MCP service config
 │
+├── docs/                     # Documentation
+│   ├── phase1-design.md      # Phase 1 technical design
+│   └── skill-usage-guide.md  # Skill usage guide
+│
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts            # Vite config
@@ -191,6 +210,64 @@ mcp-bridge/
 ```
 
 ## API Design
+
+### Skills API
+
+```http
+# List all Skills
+GET /api/skills
+
+# Get single Skill
+GET /api/skills/:name
+
+# Create Skill
+POST /api/skills
+Content-Type: application/json
+{
+  "name": "weather_recommend",
+  "displayName": "Weather Activity Recommendation",
+  "description": "Recommend suitable activities based on weather",
+  "triggerPhrases": ["recommend activity", "what to do weekend"],
+  "exposeModes": {
+    "asSkill": true,
+    "asTool": true,
+    "asPrompt": true
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "city": { "type": "string", "description": "City name" }
+    },
+    "required": ["city"]
+  },
+  "nodes": [
+    { "id": "start", "type": "start", "name": "Start" },
+    { "id": "n1", "type": "tool", "name": "Query Weather", "config": { "toolName": "weather_query" } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "n1" }
+  ]
+}
+
+# Update Skill
+PUT /api/skills/:name
+
+# Delete Skill
+DELETE /api/skills/:name
+
+# Invoke Skill
+POST /api/skills/:name/invoke
+Content-Type: application/json
+{
+  "city": "Beijing"
+}
+
+# Download SKILL.md
+GET /api/skills/:name/skill-md
+
+# Download Prompt Template
+GET /api/skills/:name/prompt-template
+```
 
 ### Tools API
 
@@ -647,7 +724,10 @@ client.disconnect()
 | Feature | Status | Description |
 |---------|--------|-------------|
 | **Tools Core Module** | ✅ Done | Registry + Executor (memory storage) |
+| **Skill Orchestration Engine** | ✅ Done | Visual orchestration, conditional branching, multi-tool composition |
+| **Skill Documentation Generation** | ✅ Done | Auto-generate SKILL.md and Prompt templates |
 | **HTTP API (Tools)** | ✅ Done | CRUD + invoke test endpoint |
+| **HTTP API (Skills)** | ✅ Done | CRUD + invoke + documentation download |
 | **SSE Transport** | ✅ Done | MCP Client connection via SSE |
 | **WebSocket Service** | ✅ Done | Bidirectional communication, heartbeat, event subscription |
 | **WebSocket Handler** | ✅ Done | Tool execution request/response flow |
@@ -668,9 +748,9 @@ client.disconnect()
 | **stdio Transport** | ❌ Pending | Local process communication |
 | **Resources Module** | ❌ Pending | Resource registration and reading |
 | **Prompts Module** | ❌ Pending | Prompt template management |
-| **React Web UI** | ❌ Pending | Full management interface |
+| **React Web UI** | ✅ Done | Full management interface (Skill orchestration, tool management, logs) |
 | **Persistent Storage** | ❌ Pending | SQLite/Redis support |
-| **Unit Tests** | ❌ Pending | Test coverage |
+| **Unit Tests** | ✅ Done | Core module test coverage |
 | **Docker Config** | ❌ Pending | Dockerfile + docker-compose |
 | **Script Handler** | ❌ Pending | Sandbox script execution |
 
@@ -691,17 +771,26 @@ client.disconnect()
    - ✅ `sdk/test-sdk.html` - SDK test page
    - ✅ `mcp-bridge-sdk` - NPM package
 
-### Phase 2: Feature Enhancement
-1. ✅ SSE transport support
-2. 🚧 static / http handler support
-3. ❌ Resources module
-4. ❌ Prompts module
+### Phase 2: Skill Orchestration Engine ✅ Completed
+1. ✅ Skill core type definitions
+2. ✅ Skill execution engine (tool invocation, conditional branching)
+3. ✅ Skill registry
+4. ✅ Visual orchestration UI
+5. ✅ Documentation generation
+   - ✅ SKILL.md auto-generation
+   - ✅ Prompt template generation
+6. ✅ HTTP API (Skills CRUD + invoke + doc download)
+
+### Phase 3: Feature Enhancement
+1. 🚧 static / http handler support
+2. ❌ Resources module
+3. ❌ Prompts module
 
 ### Phase 3: Persistence & Optimization
 1. ❌ Storage layer upgrade (SQLite/Redis)
-2. ❌ Unit tests
+2. ✅ Unit tests
 3. ❌ Performance optimization
-4. ❌ Documentation improvement
+4. ✅ Documentation improvement
 
 ## Handler Types
 
@@ -712,6 +801,7 @@ Tools support multiple handler types:
 | `static` | Return static data | Mock data, fixed config |
 | `http` | Call external HTTP API | Third-party service integration |
 | `websocket` | Call frontend via WebSocket | Operations requiring frontend |
+| `skill` | Call existing Skill | Reuse existing Skill capabilities |
 | `script` | Execute script (sandbox) | Custom logic |
 
 ```typescript

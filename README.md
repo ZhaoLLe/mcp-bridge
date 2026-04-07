@@ -31,6 +31,7 @@ npm run dev
 
 ### 1. 动态注册 MCP 能力
 - **Tools**: 动态注册可被 MCP Client 调用的工具函数 ✅
+- **Skills**: 可视化编排复杂工作流，支持条件分支、多工具组合 ✅
 - **Resources**: 动态注册可被读取的资源（规划中）
 - **Prompts**: 动态注册预定义的提示词模板（规划中）
 
@@ -153,10 +154,13 @@ mcp-bridge/
 │   ├── config.ts             # 配置管理
 │   │
 │   ├── core/                 # 核心引擎
+│   │   ├── types.ts          # 核心类型定义
 │   │   ├── registry.ts       # 工具注册中心（内存存储）
 │   │   ├── executor.ts       # 工具执行器
-│   │   ├── schemas.ts        # Zod 验证模式
-│   │   └── types.ts          # 核心类型定义
+│   │   ├── skillRegistry.ts  # Skill 注册中心
+│   │   ├── skillExecutor.ts  # Skill 执行引擎
+│   │   ├── skillMdGenerator.ts # SKILL.md 生成器
+│   │   └── schemas.ts        # Zod 验证模式
 │   │
 │   ├── transport/            # 传输层
 │   │   ├── sse.ts            # SSE MCP 服务器
@@ -165,11 +169,22 @@ mcp-bridge/
 │   │   └── ws-route.ts       # WebSocket 路由
 │   │
 │   ├── api/                  # HTTP API 路由
-│   │   └── tools.ts          # Tools CRUD API
+│   │   ├── tools.ts          # Tools CRUD API
+│   │   ├── skills.ts         # Skills CRUD + invoke API
+│   │   └── logs.ts           # 日志查询 API
 │   │
-│   └── web/                  # Web UI Hooks
-│       ├── useWebSocket.ts   # WebSocket 连接 Hook
-│       └── useApi.ts         # HTTP API Hook
+│   └── web/                  # React Web UI
+│       ├── App.tsx           # 主应用组件
+│       ├── main.tsx          # 入口
+│       ├── index.html        # HTML 模板
+│       ├── styles.css        # 全局样式
+│       ├── components/       # 可复用组件
+│       ├── pages/            # 页面组件
+│       │   ├── ToolListPage.tsx
+│       │   ├── SkillEditorPage.tsx
+│       │   └── LogsPage.tsx
+│       └── services/
+│           └── api.ts        # API 客户端
 │
 ├── sdk/                      # 前端 SDK
 │   ├── src/
@@ -184,6 +199,10 @@ mcp-bridge/
 ├── .mcp/
 │   └── settings.json         # MCP 服务配置
 │
+├── docs/                     # 文档
+│   ├── phase1-design.md      # 第一阶段技术方案
+│   └── skill-usage-guide.md  # Skill 使用指南
+│
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts            # Vite 配置
@@ -191,6 +210,64 @@ mcp-bridge/
 ```
 
 ## API 设计
+
+### Skills API
+
+```http
+# 列出所有 Skills
+GET /api/skills
+
+# 获取单个 Skill
+GET /api/skills/:name
+
+# 创建 Skill
+POST /api/skills
+Content-Type: application/json
+{
+  "name": "weather_recommend",
+  "displayName": "天气活动推荐",
+  "description": "根据天气情况推荐合适的活动",
+  "triggerPhrases": ["推荐活动", "周末干什么"],
+  "exposeModes": {
+    "asSkill": true,
+    "asTool": true,
+    "asPrompt": true
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "city": { "type": "string", "description": "城市名称" }
+    },
+    "required": ["city"]
+  },
+  "nodes": [
+    { "id": "start", "type": "start", "name": "开始" },
+    { "id": "n1", "type": "tool", "name": "查询天气", "config": { "toolName": "weather_query" } }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start", "target": "n1" }
+  ]
+}
+
+# 更新 Skill
+PUT /api/skills/:name
+
+# 删除 Skill
+DELETE /api/skills/:name
+
+# 调用 Skill
+POST /api/skills/:name/invoke
+Content-Type: application/json
+{
+  "city": "北京"
+}
+
+# 下载 SKILL.md
+GET /api/skills/:name/skill-md
+
+# 下载 Prompt 模板
+GET /api/skills/:name/prompt-template
+```
 
 ### Tools API
 
@@ -648,7 +725,10 @@ client.disconnect()
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | **Tools 核心模块** | ✅ 完成 | Registry + Executor（内存存储） |
+| **Skill 编排引擎** | ✅ 完成 | 可视化编排、条件分支、多工具组合 |
+| **Skill 文档生成** | ✅ 完成 | 自动生成 SKILL.md 和 Prompt 模板 |
 | **HTTP API (Tools)** | ✅ 完成 | CRUD + invoke 测试接口 |
+| **HTTP API (Skills)** | ✅ 完成 | CRUD + invoke + 文档下载 |
 | **SSE Transport** | ✅ 完成 | 支持 MCP Client 通过 SSE 连接 |
 | **WebSocket 服务** | ✅ 完成 | 双向通信、心跳检测、事件订阅 |
 | **WebSocket Handler** | ✅ 完成 | 工具执行请求/响应流程 |
@@ -669,9 +749,9 @@ client.disconnect()
 | **stdio Transport** | ❌ 未开始 | 本地进程通信模式 |
 | **Resources 模块** | ❌ 未开始 | 资源注册与读取 |
 | **Prompts 模块** | ❌ 未开始 | 提示词模板管理 |
-| **React Web UI** | ❌ 未开始 | 完整管理界面 |
+| **React Web UI** | ✅ 已完成 | 完整管理界面（Skill 编排、工具管理、日志查看） |
 | **持久化存储** | ❌ 未开始 | SQLite/Redis 支持 |
-| **单元测试** | ❌ 未开始 | 测试覆盖 |
+| **单元测试** | ✅ 已完成 | 核心模块测试覆盖 |
 | **Docker 配置** | ❌ 未开始 | Dockerfile + docker-compose |
 | **Script Handler** | ❌ 未开始 | 沙箱脚本执行 |
 
@@ -692,17 +772,26 @@ client.disconnect()
    - ✅ `sdk/test-sdk.html` - SDK 测试页面
    - ✅ `mcp-bridge-sdk` - NPM 包
 
-### 第二阶段：完善功能
-1. ✅ SSE transport 支持
-2. 🚧 static / http handler 支持
-3. ❌ Resources 模块
-4. ❌ Prompts 模块
+### 第二阶段：Skill 编排引擎 ✅ 已完成
+1. ✅ Skill 核心类型定义
+2. ✅ Skill 执行引擎（支持工具调用、条件分支）
+3. ✅ Skill 注册中心
+4. ✅ 可视化编排 UI
+5. ✅ 文档生成功能
+   - ✅ SKILL.md 自动生成
+   - ✅ Prompt 模板生成
+6. ✅ HTTP API (Skills CRUD + invoke + 文档下载)
+
+### 第三阶段：完善功能
+1. 🚧 static / http handler 支持
+2. ❌ Resources 模块
+3. ❌ Prompts 模块
 
 ### 第三阶段：持久化与优化
 1. ❌ 存储层升级（SQLite/Redis）
-2. ❌ 单元测试
+2. ✅ 单元测试
 3. ❌ 性能优化
-4. ❌ 文档完善
+4. ✅ 文档完善
 
 ## Handler 类型
 
@@ -713,6 +802,7 @@ client.disconnect()
 | `static` | 返回静态数据 | Mock 数据、固定配置 |
 | `http` | 调用外部 HTTP API | 集成第三方服务 |
 | `websocket` | 通过 WebSocket 调用前端 | 需要前端参与的操作 |
+| `skill` | 调用已定义的 Skill | 复用已有 Skill 能力 |
 | `script` | 执行脚本（沙箱） | 自定义逻辑 |
 
 ```typescript
